@@ -453,6 +453,12 @@ func createAction(ctx *cli.Context) error {
 			return err
 		}
 
+		// Unknown Extension
+		uExt := pkix.Extension{}
+		uExt.Id = asn1.ObjectIdentifier{1, 2, 3, 4, 5}
+		uExt.Critical = false
+		uExt.Value = []byte("foo")
+
 		csr := &x509.CertificateRequest{
 			Subject: pkix.Name{
 				CommonName: subject,
@@ -460,7 +466,7 @@ func createAction(ctx *cli.Context) error {
 			DNSNames:        dnsNames,
 			IPAddresses:     ips,
 			EmailAddresses:  emails,
-			ExtraExtensions: []pkix.Extension{bcExt, keyUsageExt, extKeyUsageExt, ncExt},
+			ExtraExtensions: []pkix.Extension{bcExt, keyUsageExt, extKeyUsageExt, ncExt, uExt},
 		}
 		csrBytes, err := x509.CreateCertificateRequest(rand.Reader, csr, priv)
 		if err != nil {
