@@ -28,4 +28,4 @@ require (
 )
 
 // replace github.com/smallstep/certificates => ../certificates
-// replace github.com/smallstep/certinfo => ../certinfo
+replace github.com/smallstep/certinfo => ../certinfo

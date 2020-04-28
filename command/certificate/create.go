@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/pem"
 
 	"github.com/pkg/errors"
@@ -227,6 +228,100 @@ the **--ca** flag.`,
 	}
 }
 
+type basicConstraints struct {
+	IsCA       bool `asn1:"optional"`
+	MaxPathLen int  `asn1:"optional,default:-1"`
+}
+
+// asn1BitLength returns the bit-length of bitString by considering the
+// most-significant bit in a byte to be the "first" bit. This convention
+// matches ASN.1, but differs from almost everything else.
+func asn1BitLength(bitString []byte) int {
+	bitLen := len(bitString) * 8
+	for i := range bitString {
+		b := bitString[len(bitString)-i-1]
+		for bit := uint(0); bit < 8; bit++ {
+			if (b>>bit)&1 == 1 {
+				return bitLen
+			}
+			bitLen--
+		}
+	}
+	return 0
+}
+
+func reverseBitsInAByte(in byte) byte {
+	b1 := in>>4 | in<<4
+	b2 := b1>>2&0x33 | b1<<2&0xcc
+	b3 := b2>>1&0x55 | b2<<1&0xaa
+	return b3
+}
+
+// RFC 5280, 4.2.1.12  Extended Key Usage
+//
+// anyExtendedKeyUsage OBJECT IDENTIFIER ::= { id-ce-extKeyUsage 0 }
+//
+// id-kp OBJECT IDENTIFIER ::= { id-pkix 3 }
+//
+// id-kp-serverAuth             OBJECT IDENTIFIER ::= { id-kp 1 }
+// id-kp-clientAuth             OBJECT IDENTIFIER ::= { id-kp 2 }
+// id-kp-codeSigning            OBJECT IDENTIFIER ::= { id-kp 3 }
+// id-kp-emailProtection        OBJECT IDENTIFIER ::= { id-kp 4 }
+// id-kp-timeStamping           OBJECT IDENTIFIER ::= { id-kp 8 }
+// id-kp-OCSPSigning            OBJECT IDENTIFIER ::= { id-kp 9 }
+var (
+	oidExtKeyUsageAny                        = asn1.ObjectIdentifier{2, 5, 29, 37, 0}
+	oidExtKeyUsageServerAuth                 = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 1}
+	oidExtKeyUsageClientAuth                 = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 2}
+	oidExtKeyUsageCodeSigning                = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 3}
+	oidExtKeyUsageEmailProtection            = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 4}
+	oidExtKeyUsageIPSECEndSystem             = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 5}
+	oidExtKeyUsageIPSECTunnel                = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 6}
+	oidExtKeyUsageIPSECUser                  = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 7}
+	oidExtKeyUsageTimeStamping               = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 8}
+	oidExtKeyUsageOCSPSigning                = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 9}
+	oidExtKeyUsageMicrosoftServerGatedCrypto = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 10, 3, 3}
+	oidExtKeyUsageNetscapeServerGatedCrypto  = asn1.ObjectIdentifier{2, 16, 840, 1, 113730, 4, 1}
+)
+
+// extKeyUsageOIDs contains the mapping between an ExtKeyUsage and its OID.
+var extKeyUsageOIDs = []struct {
+	extKeyUsage x509.ExtKeyUsage
+	oid         asn1.ObjectIdentifier
+}{
+	{x509.ExtKeyUsageAny, oidExtKeyUsageAny},
+	{x509.ExtKeyUsageServerAuth, oidExtKeyUsageServerAuth},
+	{x509.ExtKeyUsageClientAuth, oidExtKeyUsageClientAuth},
+	{x509.ExtKeyUsageCodeSigning, oidExtKeyUsageCodeSigning},
+	{x509.ExtKeyUsageEmailProtection, oidExtKeyUsageEmailProtection},
+	{x509.ExtKeyUsageIPSECEndSystem, oidExtKeyUsageIPSECEndSystem},
+	{x509.ExtKeyUsageIPSECTunnel, oidExtKeyUsageIPSECTunnel},
+	{x509.ExtKeyUsageIPSECUser, oidExtKeyUsageIPSECUser},
+	{x509.ExtKeyUsageTimeStamping, oidExtKeyUsageTimeStamping},
+	{x509.ExtKeyUsageOCSPSigning, oidExtKeyUsageOCSPSigning},
+	{x509.ExtKeyUsageMicrosoftServerGatedCrypto, oidExtKeyUsageMicrosoftServerGatedCrypto},
+	{x509.ExtKeyUsageNetscapeServerGatedCrypto, oidExtKeyUsageNetscapeServerGatedCrypto},
+}
+
+func oidFromExtKeyUsage(eku x509.ExtKeyUsage) (oid asn1.ObjectIdentifier, ok bool) {
+	for _, pair := range extKeyUsageOIDs {
+		if eku == pair.extKeyUsage {
+			return pair.oid, true
+		}
+	}
+	return
+}
+
+// RFC 5280, 4.2.1.10
+type nameConstraints struct {
+	Permitted []generalSubtree `asn1:"optional,tag:0"`
+	Excluded  []generalSubtree `asn1:"optional,tag:1"`
+}
+
+type generalSubtree struct {
+	Name string `asn1:"tag:2,optional,ia5"`
+}
+
 func createAction(ctx *cli.Context) error {
 	if err := errs.NumberOfArguments(ctx, 3); err != nil {
 		return err
@@ -295,13 +390,77 @@ func createAction(ctx *cli.Context) error {
 		}
 		dnsNames, ips, emails := x509util.SplitSANs(sans)
 
+		// KeyUsage Extension
+		keyUsageExt := pkix.Extension{}
+		keyUsageExt.Id = asn1.ObjectIdentifier{2, 5, 29, 15}
+		keyUsageExt.Critical = true
+		ku := x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageCertSign
+		var a [2]byte
+		a[0] = reverseBitsInAByte(byte(ku))
+		a[1] = reverseBitsInAByte(byte(ku >> 8))
+		l := 1
+		if a[1] != 0 {
+			l = 2
+		}
+		bitString := a[:l]
+		keyUsageExt.Value, err = asn1.Marshal(asn1.BitString{Bytes: bitString, BitLength: asn1BitLength(bitString)})
+		if err != nil {
+			return err
+		}
+
+		// BasicConstraints Extension
+		bcExt := pkix.Extension{}
+		bcExt.Id = asn1.ObjectIdentifier{2, 5, 29, 19}
+		bcExt.Critical = false
+		bcExt.Value, err = asn1.Marshal(basicConstraints{IsCA: true, MaxPathLen: 1})
+		if err != nil {
+			return err
+		}
+
+		// ExtendedKeyUSage Extension
+		extKeyUsageExt := pkix.Extension{}
+		extKeyUsageExt.Id = asn1.ObjectIdentifier{2, 5, 29, 37}
+		extKeyUsageExt.Critical = false
+		var oids []asn1.ObjectIdentifier
+		var eku []x509.ExtKeyUsage = []x509.ExtKeyUsage{
+			x509.ExtKeyUsageServerAuth,
+			x509.ExtKeyUsageClientAuth,
+		}
+		for _, u := range eku {
+			if oid, ok := oidFromExtKeyUsage(u); ok {
+				oids = append(oids, oid)
+			} else {
+				return err
+			}
+		}
+		extKeyUsageExt.Value, err = asn1.Marshal(oids)
+		if err != nil {
+			return err
+		}
+
+		// NameConstraints Extension
+		ncExt := pkix.Extension{}
+		ncExt.Id = asn1.ObjectIdentifier{2, 5, 29, 30}
+		ncExt.Critical = true
+		var out nameConstraints
+		permittedDNSDomains := []string{"foo", "bar", "baz"}
+		out.Permitted = make([]generalSubtree, len(permittedDNSDomains))
+		for i, permitted := range permittedDNSDomains {
+			out.Permitted[i] = generalSubtree{Name: permitted}
+		}
+		ncExt.Value, err = asn1.Marshal(out)
+		if err != nil {
+			return err
+		}
+
 		csr := &x509.CertificateRequest{
 			Subject: pkix.Name{
 				CommonName: subject,
 			},
-			DNSNames:       dnsNames,
-			IPAddresses:    ips,
-			EmailAddresses: emails,
+			DNSNames:        dnsNames,
+			IPAddresses:     ips,
+			EmailAddresses:  emails,
+			ExtraExtensions: []pkix.Extension{bcExt, keyUsageExt, extKeyUsageExt, ncExt},
 		}
 		csrBytes, err := x509.CreateCertificateRequest(rand.Reader, csr, priv)
 		if err != nil {
