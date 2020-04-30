@@ -270,18 +270,20 @@ func reverseBitsInAByte(in byte) byte {
 // id-kp-timeStamping           OBJECT IDENTIFIER ::= { id-kp 8 }
 // id-kp-OCSPSigning            OBJECT IDENTIFIER ::= { id-kp 9 }
 var (
-	oidExtKeyUsageAny                        = asn1.ObjectIdentifier{2, 5, 29, 37, 0}
-	oidExtKeyUsageServerAuth                 = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 1}
-	oidExtKeyUsageClientAuth                 = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 2}
-	oidExtKeyUsageCodeSigning                = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 3}
-	oidExtKeyUsageEmailProtection            = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 4}
-	oidExtKeyUsageIPSECEndSystem             = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 5}
-	oidExtKeyUsageIPSECTunnel                = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 6}
-	oidExtKeyUsageIPSECUser                  = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 7}
-	oidExtKeyUsageTimeStamping               = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 8}
-	oidExtKeyUsageOCSPSigning                = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 9}
-	oidExtKeyUsageMicrosoftServerGatedCrypto = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 10, 3, 3}
-	oidExtKeyUsageNetscapeServerGatedCrypto  = asn1.ObjectIdentifier{2, 16, 840, 1, 113730, 4, 1}
+	oidExtKeyUsageAny                            = asn1.ObjectIdentifier{2, 5, 29, 37, 0}
+	oidExtKeyUsageServerAuth                     = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 1}
+	oidExtKeyUsageClientAuth                     = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 2}
+	oidExtKeyUsageCodeSigning                    = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 3}
+	oidExtKeyUsageEmailProtection                = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 4}
+	oidExtKeyUsageIPSECEndSystem                 = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 5}
+	oidExtKeyUsageIPSECTunnel                    = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 6}
+	oidExtKeyUsageIPSECUser                      = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 7}
+	oidExtKeyUsageTimeStamping                   = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 8}
+	oidExtKeyUsageOCSPSigning                    = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 9}
+	oidExtKeyUsageMicrosoftServerGatedCrypto     = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 10, 3, 3}
+	oidExtKeyUsageNetscapeServerGatedCrypto      = asn1.ObjectIdentifier{2, 16, 840, 1, 113730, 4, 1}
+	oidExtKeyUsageMicrosoftCommercialCodeSigning = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 2, 1, 22}
+	oidExtKeyUsageMicrosoftKernelCodeSigning     = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 61, 1, 1}
 )
 
 // extKeyUsageOIDs contains the mapping between an ExtKeyUsage and its OID.
@@ -301,6 +303,8 @@ var extKeyUsageOIDs = []struct {
 	{x509.ExtKeyUsageOCSPSigning, oidExtKeyUsageOCSPSigning},
 	{x509.ExtKeyUsageMicrosoftServerGatedCrypto, oidExtKeyUsageMicrosoftServerGatedCrypto},
 	{x509.ExtKeyUsageNetscapeServerGatedCrypto, oidExtKeyUsageNetscapeServerGatedCrypto},
+	{x509.ExtKeyUsageMicrosoftKernelCodeSigning, oidExtKeyUsageMicrosoftKernelCodeSigning},
+	{x509.ExtKeyUsageMicrosoftCommercialCodeSigning, oidExtKeyUsageMicrosoftCommercialCodeSigning},
 }
 
 func oidFromExtKeyUsage(eku x509.ExtKeyUsage) (oid asn1.ObjectIdentifier, ok bool) {
@@ -320,6 +324,11 @@ type nameConstraints struct {
 
 type generalSubtree struct {
 	Name string `asn1:"tag:2,optional,ia5"`
+}
+
+type userExt struct {
+	FName string `asn1:"tag:0,optional,ia5"`
+	LName string `asn1:"tag:1,optional,ia5"`
 }
 
 func createAction(ctx *cli.Context) error {
@@ -425,6 +434,7 @@ func createAction(ctx *cli.Context) error {
 		var eku []x509.ExtKeyUsage = []x509.ExtKeyUsage{
 			x509.ExtKeyUsageServerAuth,
 			x509.ExtKeyUsageClientAuth,
+			x509.ExtKeyUsageMicrosoftKernelCodeSigning,
 		}
 		for _, u := range eku {
 			if oid, ok := oidFromExtKeyUsage(u); ok {
@@ -433,6 +443,8 @@ func createAction(ctx *cli.Context) error {
 				return err
 			}
 		}
+		// Add unknown extkeyusage
+		oids = append(oids, asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 4})
 		extKeyUsageExt.Value, err = asn1.Marshal(oids)
 		if err != nil {
 			return err
@@ -459,6 +471,14 @@ func createAction(ctx *cli.Context) error {
 		uExt.Critical = false
 		uExt.Value = []byte("foo")
 
+		u2Ext := pkix.Extension{}
+		u2Ext.Id = asn1.ObjectIdentifier{1, 1, 13, 1, 2, 4, 15, 17, 1, 3, 1, 2, 4, 1}
+		u2Ext.Critical = true
+		u2Ext.Value, err = asn1.Marshal(userExt{FName: "max", LName: "furman"})
+		if err != nil {
+			return err
+		}
+
 		csr := &x509.CertificateRequest{
 			Subject: pkix.Name{
 				CommonName: subject,
@@ -466,7 +486,7 @@ func createAction(ctx *cli.Context) error {
 			DNSNames:        dnsNames,
 			IPAddresses:     ips,
 			EmailAddresses:  emails,
-			ExtraExtensions: []pkix.Extension{bcExt, keyUsageExt, extKeyUsageExt, ncExt, uExt},
+			ExtraExtensions: []pkix.Extension{bcExt, keyUsageExt, extKeyUsageExt, ncExt, uExt, u2Ext},
 		}
 		csrBytes, err := x509.CreateCertificateRequest(rand.Reader, csr, priv)
 		if err != nil {
