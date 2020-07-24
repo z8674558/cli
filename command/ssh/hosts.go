@@ -78,6 +78,11 @@ func hostsAction(ctx *cli.Context) error {
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\n", h.Hostname, h.HostID, tags)
 	}
+	if len(resp.Hosts) == 0 {
+		fmt.Fprintln(w, "[EMPTY]")
+	}
+	fmt.Fprintln(w, "---")
+	fmt.Fprintf(w, "To connect, run:\n\n\tssh [hostname]\n\n")
 	w.Flush()
 	return nil
 }
