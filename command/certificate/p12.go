@@ -3,7 +3,6 @@ package certificate
 import (
 	"crypto/rand"
 	"crypto/x509"
-	"fmt"
 	"github.com/pkg/errors"
 	"github.com/smallstep/cli/command"
 	"github.com/smallstep/cli/crypto/pemutil"
@@ -13,7 +12,6 @@ import (
 	"github.com/smallstep/cli/utils"
 	"github.com/urfave/cli"
 	"io/ioutil"
-
 
 	"software.sslmate.com/src/go-pkcs12"
 )
@@ -115,15 +113,15 @@ func p12Action(ctx *cli.Context) error {
 		if err != nil{
 			return err
 		}
-		privatekey, cert, ca, err := pkcs12.DecodeChain(pkcs12Data,password)
+		privatekey, cert, _, err := pkcs12.DecodeChain(pkcs12Data,password)
 		if err != nil{
 			return err
 		}
 
-		utils.WriteFile(crtFile+"yes", cert.Raw, 0600)
-		//utils.WriteFile(keyFile+"yesKEY", , 0600) 
-		fmt.Println(ca)
-		fmt.Sprint(privatekey)
+		utils.WriteFile(crtFile+"yes.crt", cert.Raw, 0600)
+		pk, err := x509.MarshalPKCS8PrivateKey(privatekey)
+		utils.WriteFile(keyFile+"yesKEY.key", pk , 0600)
+
 		return nil
 
 
