@@ -3,7 +3,7 @@ package certificate
 import (
 	"crypto/rand"
 	"crypto/x509"
-
+	"fmt"
 	"github.com/pkg/errors"
 	"github.com/smallstep/cli/command"
 	"github.com/smallstep/cli/crypto/pemutil"
@@ -12,6 +12,8 @@ import (
 	"github.com/smallstep/cli/ui"
 	"github.com/smallstep/cli/utils"
 	"github.com/urfave/cli"
+	"io/ioutil"
+
 
 	"software.sslmate.com/src/go-pkcs12"
 )
@@ -67,6 +69,10 @@ multiple CAs or intermediates.`,
 				Name:  "password-file",
 				Usage: `The path to the <file> containing the password to encrypt the .p12 file.`,
 			},
+			cli.BoolFlag{
+				Name: "extract",
+				Usage: `Allows certificate and key to be extracted from p12 file`,
+			},
 			flags.NoPassword,
 			flags.Force,
 			flags.Insecure,
@@ -83,7 +89,45 @@ func p12Action(ctx *cli.Context) error {
 	crtFile := ctx.Args().Get(1)
 	keyFile := ctx.Args().Get(2)
 	caFiles := ctx.StringSlice("ca")
+	extract := ctx.Bool("extract")
 	hasKeyAndCert := crtFile != "" && keyFile != ""
+
+	if extract{
+		var err error
+		var password string
+		if !ctx.Bool("no-password") {
+			if passwordFile := ctx.String("password-file"); passwordFile != "" {
+				password, err = utils.ReadStringPasswordFromFile(passwordFile)
+				if err != nil {
+					return err
+				}
+			}
+
+			if password == "" {
+				pass, err := ui.PromptPassword("Please enter the password to decrypt the .p12 file")
+				if err != nil {
+					return errors.Wrap(err, "error reading password")
+				}
+				password = string(pass)
+			}
+		}
+		pkcs12Data, _ := ioutil.ReadFile(p12File)
+		if err != nil{
+			return err
+		}
+		privatekey, cert, ca, err := pkcs12.DecodeChain(pkcs12Data,password)
+		if err != nil{
+			return err
+		}
+
+		utils.WriteFile(crtFile+"yes", cert.Raw, 0600)
+		//utils.WriteFile(keyFile+"yesKEY", , 0600) 
+		fmt.Println(ca)
+		fmt.Sprint(privatekey)
+		return nil
+
+
+	}
 
 	//If either key or cert are provided, both must be provided
 	if !hasKeyAndCert && (crtFile != "" || keyFile != "") {
@@ -164,6 +208,7 @@ func p12Action(ctx *cli.Context) error {
 	if err := utils.WriteFile(p12File, pkcs12Data, 0600); err != nil {
 		return err
 	}
+
 
 	ui.Printf("Your .p12 bundle has been saved as %s.\n", p12File)
 	return nil
