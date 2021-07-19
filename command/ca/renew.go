@@ -62,7 +62,7 @@ to provide certificate reloads on your services.
 ## POSITIONAL ARGUMENTS
 
 <crt-file>
-:  The certificate in PEM format that we want to renew.
+:  The certificate in PEM format that we want to renew. The certificate must have "Client Authentication" key usage enabled.
 
 <key-file>
 :  They key file of the certificate.
