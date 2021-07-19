@@ -55,7 +55,11 @@ Package a certificate and private key with an empty password:
 
 '''
 $ step certificate p12 --no-password --insecure foo.p12 foo.crt foo.key
-'''`,
+'''
+
+Extract Certificate and Key from packaged .p12 file to given file name
+$ step certificate p12 --extract foo.p12 foo.crt bar.key
+`,
 		Flags: []cli.Flag{
 			cli.StringSliceFlag{
 				Name: "ca",
@@ -69,7 +73,7 @@ multiple CAs or intermediates.`,
 			},
 			cli.BoolFlag{
 				Name: "extract",
-				Usage: `Allows certificate and key to be extracted from p12 file`,
+				Usage: `Allows certificate and key to be extracted from .p12 file`,
 			},
 			flags.NoPassword,
 			flags.Force,
@@ -90,6 +94,26 @@ func p12Action(ctx *cli.Context) error {
 	extract := ctx.Bool("extract")
 	hasKeyAndCert := crtFile != "" && keyFile != ""
 
+
+
+	//If either key or cert are provided, both must be provided
+	if !hasKeyAndCert && (crtFile != "" || keyFile != "") {
+		return errs.MissingArguments(ctx, "key_file")
+	}
+
+	//If no key and cert are provided, ca files must be provided
+	if !hasKeyAndCert && len(caFiles) == 0 {
+		return errors.Errorf("flag '--%s' must be provided when no <crt_path> and <key_path> are present", "ca")
+	}
+
+	// Validate flags
+	switch {
+	case ctx.String("password-file") != "" && ctx.Bool("no-password"):
+		return errs.IncompatibleFlagWithFlag(ctx, "no-password", "password-file")
+	case ctx.Bool("no-password") && !ctx.Bool("insecure"):
+		return errs.RequiredInsecureFlag(ctx, "no-password")
+	}
+
 	if extract{
 		var err error
 		var password string
@@ -109,41 +133,28 @@ func p12Action(ctx *cli.Context) error {
 				password = string(pass)
 			}
 		}
+
 		pkcs12Data, _ := ioutil.ReadFile(p12File)
 		if err != nil{
 			return err
 		}
+
 		privatekey, cert, _, err := pkcs12.DecodeChain(pkcs12Data,password)
 		if err != nil{
 			return err
 		}
 
-		utils.WriteFile(crtFile+"yes.crt", cert.Raw, 0600)
+		utils.WriteFile(crtFile, cert.Raw, 0600)
 		pk, err := x509.MarshalPKCS8PrivateKey(privatekey)
-		utils.WriteFile(keyFile+"yesKEY.key", pk , 0600)
+		if err != nil{
+			return err
+		}
+		utils.WriteFile(keyFile, pk , 0600)
 
+		ui.Printf("Your certificate and key have been extracted and saved to %s %s.\n", crtFile,keyFile)
 		return nil
-
-
 	}
 
-	//If either key or cert are provided, both must be provided
-	if !hasKeyAndCert && (crtFile != "" || keyFile != "") {
-		return errs.MissingArguments(ctx, "key_file")
-	}
-
-	//If no key and cert are provided, ca files must be provided
-	if !hasKeyAndCert && len(caFiles) == 0 {
-		return errors.Errorf("flag '--%s' must be provided when no <crt_path> and <key_path> are present", "ca")
-	}
-
-	// Validate flags
-	switch {
-	case ctx.String("password-file") != "" && ctx.Bool("no-password"):
-		return errs.IncompatibleFlagWithFlag(ctx, "no-password", "password-file")
-	case ctx.Bool("no-password") && !ctx.Bool("insecure"):
-		return errs.RequiredInsecureFlag(ctx, "no-password")
-	}
 
 	x509CAs := []*x509.Certificate{}
 	for _, caFile := range caFiles {
