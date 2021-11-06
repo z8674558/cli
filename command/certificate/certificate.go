@@ -94,6 +94,7 @@ $ step certificate uninstall root-ca.crt
 			installCommand(),
 			uninstallCommand(),
 			p12Command(),
+			extractCommand(),
 		},
 	}
 
